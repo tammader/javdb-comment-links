@@ -42,6 +42,37 @@ def _scan_dirs(base_glob):
     return sorted(out)
 
 
+def _load_progress():
+    """读取 state + movie_codes，算出累计进度：已处理 / 总番号 / 剩余"""
+    base = os.environ.get('JAVDB_OUT_DIR', '.')
+    dist_dir = os.environ.get('JAVDB_DIST_DIR', base)  # movie_codes.json 所在（workflow 里=仓库根）
+    total = None
+    for d in (dist_dir, base, '.'):
+        p = os.path.join(d, 'movie_codes.json')
+        if os.path.exists(p):
+            try:
+                total = len(json.load(open(p, encoding='utf-8')).get('codes', []))
+                break
+            except Exception:
+                pass
+    st = None
+    for d in (base, dist_dir, '.'):
+        p = os.path.join(d, os.environ.get('STATE_FILE', 'state_javdb.json'))
+        if os.path.exists(p):
+            try:
+                st = json.load(open(p, encoding='utf-8'))
+                break
+            except Exception:
+                pass
+    if st is None:
+        return None
+    done = len(st.get('resolved', {})) + len(st.get('no_match', []))
+    resolved = len(st.get('resolved', {}))
+    no_match = len(st.get('no_match', []))
+    return {'done': done, 'total': total, 'resolved': resolved, 'no_match': no_match,
+            'remaining': (total - done) if total is not None else None}
+
+
 def build_report(csv_paths=None, state_paths=None):
     """返回 (text, total_links)"""
     if csv_paths is None:
@@ -78,7 +109,20 @@ def build_report(csv_paths=None, state_paths=None):
     ts = datetime.now(BJ).strftime('%Y-%m-%d %H:%M')
     head = '📊 JavDB 评论区 magnet/ed2k 报告 · %s' % ts
     summary = '合计 %d 个去重链接（🧲 magnet %d / 🔗 ed2k %d）' % (total_rows, total_mag, total_ed2k)
-    body = head + '\n' + summary + '\n\n' + ('\n'.join(lines) if lines else '（还没有结果）')
+    body = head + '\n' + summary
+
+    # 进度：累计已处理 / 总番号 / 剩余（分多轮慢速补齐，这里看整体进度）
+    prog = _load_progress()
+    if prog:
+        if prog['total']:
+            pct = int(round(prog['done'] * 100.0 / prog['total'])) if prog['total'] else 0
+            body += '\n📈 进度：已处理 %d/%d 个番号（%d%%）· 剩余 %d · 其中命中 %d / 无匹配 %d' % (
+                prog['done'], prog['total'], pct, prog['remaining'], prog['resolved'], prog['no_match'])
+        else:
+            body += '\n📈 进度：已处理 %d 个番号（命中 %d / 无匹配 %d）' % (
+                prog['done'], prog['resolved'], prog['no_match'])
+
+    body += '\n\n' + ('\n'.join(lines) if lines else '（还没有结果）')
 
     # 按目录来源细分（多个目录合并时才有意义）
     if folder_counter and len(folder_counter) > 1:
