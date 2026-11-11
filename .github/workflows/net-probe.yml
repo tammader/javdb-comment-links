@@ -1,0 +1,26 @@
+name: net-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe javdb reachability
+        run: |
+          python3 - <<'PY'
+          import urllib.request, json
+          try:
+              r = urllib.request.urlopen('https://jdforrepam.com/api/v1/about', timeout=20)
+              print('javdb status', r.status, r.read()[:200])
+          except Exception as e:
+              print('javdb ERR', repr(e)[:200])
+          try:
+              r = urllib.request.urlopen('https://api.telegram.org', timeout=20)
+              print('tg status', r.status)
+          except Exception as e:
+              print('tg ERR', repr(e)[:120])
+          try:
+              r = urllib.request.urlopen('https://user-njs.yun.139.com', timeout=20)
+              print('139 status', r.status)
+          except Exception as e:
+              print('139 ERR', repr(e)[:120])
+          PY
