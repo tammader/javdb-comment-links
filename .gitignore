@@ -1,0 +1,9 @@
+# 本地凭证与运行时状态（不入库）
+auth.txt
+_getauth.py
+state_*.json
+*.pyc
+__pycache__/
+
+# 运行产出的数据（每次 Actions 会重新生成并 commit 指定文件；本地临时文件忽略）
+# 注：javdb_yiyuan_*.csv / *.txt 由 workflow 自动提交，保留
