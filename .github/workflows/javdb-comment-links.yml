@@ -1,16 +1,20 @@
 name: javdb-comment-links
 
-# 每周一 03:17（北京时间）跑一次；也可手动触发
+# 每周一/三/五 03:17（北京时间）各跑一次；也可手动触发。
+# 为避免账号被风控：每轮只处理 MAX_CODES 个番号、请求间隔 3.5s；靠增量 state 分多轮补齐全部番号。
 # 数据来源：仓库里的 movie_codes.json（番号清单，由本机 gen_movie_codes.py 生成后提交）
 # 原因：GitHub 海外 runner 连不上 139 移动云盘，所以列目录只在能做的地方做，这里只爬 JavDB + 发通知
 on:
   schedule:
-    - cron: '17 19 * * 0'   # UTC 周日19:17 = 北京周一 03:17
+    - cron: '17 19 * * 0,2,4'   # UTC 周日/二/四 19:17 = 北京周一/三/五 03:17
   workflow_dispatch:
     inputs:
       cutoff:
         description: '起始日期 YYYY-MM-DD'
         default: '2026-09-01'
+      max_codes:
+        description: '本轮最多处理多少番号（0=全部）'
+        default: '40'
 
 permissions:
   contents: write
@@ -29,7 +33,9 @@ jobs:
       MOVIE_CODES_FILE: movie_codes.json
       CUTOFF: ${{ github.event.inputs.cutoff || '2026-09-01' }}
       OUT_PREFIX: javdb_yiyuan
-      SLEEP_REQ: '1.6'
+      SLEEP_REQ: '3.5'
+      MAX_CODES: ${{ github.event.inputs.max_codes || '40' }}
+      MAX_REVIEW_PAGES: '3'
       STATE_FILE: state_javdb.json
       SKIP_FC2: '1'
       PYTHONIOENCODING: utf-8
