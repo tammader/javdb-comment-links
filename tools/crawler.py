@@ -200,54 +200,69 @@ def save_state(st):
 
 
 def main():
-    auth = os.environ.get('YDY_AUTHORIZATION', '').strip()
     juser = os.environ.get('JAVDB_USERNAME', '').strip()
     jpass = os.environ.get('JAVDB_PASSWORD', '').strip()
-    if not auth or not juser or not jpass:
-        print('!! 缺少 YDY_AUTHORIZATION / JAVDB_USERNAME / JAVDB_PASSWORD')
+    if not juser or not jpass:
+        print('!! 缺少 JAVDB_USERNAME / JAVDB_PASSWORD')
         sys.exit(2)
 
-    # 1) 139 列目录（多目录合并成一个清单）
-    ty = TyPersonal(auth)
-    if not ty.login():
-        print('!! 139 登录失败（authorization 可能过期）')
-        sys.exit(3)
-    print('139 host:', ty.host, '| token 剩余 %.1f 天' % ty.expires_in_days())
-    files = []
-    folder_stat = {}
-    for folder_name in FOLDERS:
-        fo = ty.find_dir(folder_name, '/')
-        if not fo:
-            print('!! 根目录找不到文件夹: %s（跳过）' % folder_name)
-            continue
-        one = []
-        walk_ydy(ty, fo['id'], one)
-        folder_stat[folder_name] = len(one)
-        for f in one:
-            f['folder'] = folder_name
-        files.extend(one)
-        print('目录 %s 下视频文件: %d' % (folder_name, len(one)))
-    print('合并后视频文件: %d' % len(files))
-    if not files:
-        print('!! 所有目录都没取到视频')
-        sys.exit(4)
-
-    # 2) 番号（跨目录合并去重；记录每个番号来自哪些目录）
-    codes = {}
-    for f in files:
-        if SKIP_FC2 and is_fc2(f['filename']):
-            continue
-        p = parse_filename(f['filename'])
-        if not p:
-            continue
-        label, digits = p
-        key = '%s-%d' % (label, int(digits)) if digits.isdigit() else '%s-%s' % (label, digits)
-        d = codes.setdefault(key, {'label': label, 'digits': digits, 'folders': set()})
-        d['folders'].add(f.get('folder', ''))
-    keys = sorted(codes.items())
-    print('合并唯一番号: %d' % len(keys))
-    if MAX_CODES:
-        keys = keys[:MAX_CODES]
+    # ---- 番号来源：优先读清单文件（GitHub 海外连不到 139，清单由本机生成入库）----
+    codes_file = os.environ.get('MOVIE_CODES_FILE', '').strip()
+    if codes_file and os.path.exists(codes_file):
+        data = json.load(open(codes_file, encoding='utf-8'))
+        codes = {}
+        for c in data.get('codes', []):
+            key = c['code']
+            codes[key] = {'label': c['label'], 'digits': c['digits'],
+                          'folders': set(c.get('folders') or [])}
+        keys = sorted(codes.items())
+        print('从清单 %s 读取番号: %d（来源目录: %s）'
+              % (codes_file, len(keys), ','.join(data.get('generated_from') or [])))
+        if MAX_CODES:
+            keys = keys[:MAX_CODES]
+    else:
+        auth = os.environ.get('YDY_AUTHORIZATION', '').strip()
+        if not auth:
+            print('!! 既没有 MOVIE_CODES_FILE，也没有 YDY_AUTHORIZATION')
+            sys.exit(2)
+        # 1) 139 列目录（多目录合并成一个清单）
+        ty = TyPersonal(auth)
+        if not ty.login():
+            print('!! 139 登录失败（authorization 可能过期）')
+            sys.exit(3)
+        print('139 host:', ty.host, '| token 剩余 %.1f 天' % ty.expires_in_days())
+        files = []
+        for folder_name in FOLDERS:
+            fo = ty.find_dir(folder_name, '/')
+            if not fo:
+                print('!! 根目录找不到文件夹: %s（跳过）' % folder_name)
+                continue
+            one = []
+            walk_ydy(ty, fo['id'], one)
+            for f in one:
+                f['folder'] = folder_name
+            files.extend(one)
+            print('目录 %s 下视频文件: %d' % (folder_name, len(one)))
+        print('合并后视频文件: %d' % len(files))
+        if not files:
+            print('!! 所有目录都没取到视频')
+            sys.exit(4)
+        # 2) 番号（跨目录合并去重）
+        codes = {}
+        for f in files:
+            if SKIP_FC2 and is_fc2(f['filename']):
+                continue
+            p = parse_filename(f['filename'])
+            if not p:
+                continue
+            label, digits = p
+            key = '%s-%d' % (label, int(digits)) if digits.isdigit() else '%s-%s' % (label, digits)
+            d = codes.setdefault(key, {'label': label, 'digits': digits, 'folders': set()})
+            d['folders'].add(f.get('folder', ''))
+        keys = sorted(codes.items())
+        print('合并唯一番号: %d' % len(keys))
+        if MAX_CODES:
+            keys = keys[:MAX_CODES]
 
     # 3) JavDB 登录
     jc = JavDB(username=juser, password=jpass)
