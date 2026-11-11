@@ -104,12 +104,56 @@ class TyPersonal(object):
         }
         req = urllib.request.Request(url, data=body.encode("utf-8"),
                                      headers=headers, method="POST")
-        with self.op.open(req, timeout=180) as r:
-            txt = r.read().decode("utf-8", "replace")
+        try:
+            with self.op.open(req, timeout=180) as r:
+                txt = r.read().decode("utf-8", "replace")
+        except urllib.error.URLError as e:
+            # 服务器 DNS 偶发解析失败（海外 runner 常见）：用 DoH 解析后重试一次
+            if "name resolution" in str(e).lower() or "getaddrinfo" in str(e).lower():
+                self._doh_patch_host(url)
+                with self.op.open(req, timeout=180) as r:
+                    txt = r.read().decode("utf-8", "replace")
+            else:
+                raise
         try:
             return json.loads(txt)
         except Exception:
             return {"success": False, "message": txt[:200]}
+
+    def _doh_patch_host(self, url):
+        """对 url 的 host 做 DNS-over-HTTPS 解析，并临时把 socket.getaddrinfo 指到该 IP。"""
+        import socket as _socket
+        host = urllib.parse.urlsplit(url).hostname
+        if not host:
+            return
+        ips = []
+        for doh in ("https://1.1.1.1/dns-query", "https://dns.google/resolve"):
+            try:
+                import ssl as _ssl
+                ctx = _ssl.create_default_context()
+                req = urllib.request.Request(doh + "?name=%s&type=A" % host,
+                                             headers={"accept": "application/dns-json"})
+                with urllib.request.urlopen(req, timeout=20, context=ctx) as x:
+                    d = json.loads(x.read().decode("utf-8", "replace"))
+                for a in (d.get("Answer") or []):
+                    if a.get("type") == 1 and a.get("data"):
+                        ips.append(a["data"])
+                if ips:
+                    break
+            except Exception:
+                continue
+        if not ips:
+            print("   !! DoH 也解析不到 %s" % host)
+            return
+        ip = ips[0]
+        print("   ~ DoH: %s -> %s（重试）" % (host, ip))
+        orig = _socket.getaddrinfo
+
+        def patched(h, p, *args, **kw):
+            if h == host:
+                h = ip
+            return orig(h, p, *args, **kw)
+        _socket.getaddrinfo = patched
 
     # ---------- 对外 ----------
     def login(self):
