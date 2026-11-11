@@ -145,8 +145,11 @@ def resolve_movie(client, label, digits):
     target = norm_number('%s-%s' % (label, digits))
     for q in make_candidates(label, digits):
         r = _safe(client.search, q, page=1)
-        if r.get('action') == 'BannedUser':
-            raise RuntimeError('BANNED')
+        action = r.get('action') or ''
+        msg = r.get('message') or ''
+        # 账号/鉴权问题：绝不能当成"无匹配"，必须中止（否则整批数据全错）
+        if action in ('BannedUser', 'JWTVerificationError') or '登錄' in msg or '禁用' in msg:
+            raise RuntimeError('AUTH:%s:%s' % (action, msg[:40]))
         if r.get('success') != 1:
             time.sleep(SLEEP_REQ)
             continue
@@ -161,8 +164,10 @@ def crawl_movie_reviews(client, mid, code, state, folders=''):
     page = 1
     while True:
         r = _safe(client.movie_reviews, mid, page=page)
-        if r.get('action') == 'BannedUser':
-            raise RuntimeError('BANNED')
+        action = r.get('action') or ''
+        msg = r.get('message') or ''
+        if action in ('BannedUser', 'JWTVerificationError') or '登錄' in msg or '禁用' in msg:
+            raise RuntimeError('AUTH:%s:%s' % (action, msg[:40]))
         if r.get('success') != 1:
             break
         reviews = (r.get('data') or {}).get('reviews') or []
@@ -292,7 +297,7 @@ def main():
             print('[%d/%d] %s -> %s(%s) links=%d' % (i, len(keys), key, mv.get('number'), mid, len(state['rows'])))
             time.sleep(1.0)
         except RuntimeError as e:
-            print('!! %s @%s，保存并退出' % (e, key))
+            print('!! 中止 @%s：%s' % (key, e), flush=True)
             save_state(state)
             sys.exit(5)
         except Exception as e:
