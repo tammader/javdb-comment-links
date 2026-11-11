@@ -1,0 +1,79 @@
+name: javdb-comment-links
+
+# 每周一 03:17（北京时间）跑一次；也可手动触发
+# 一个清单 = 多个 139 个人云目录合并（目录名走 Secret，公开仓库不暴露）
+on:
+  schedule:
+    - cron: '17 19 * * 0'   # UTC 周日19:17 = 北京周一 03:17
+  workflow_dispatch:
+    inputs:
+      cutoff:
+        description: '起始日期 YYYY-MM-DD'
+        default: '2026-09-01'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: javdb-comment-links
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      YDY_AUTHORIZATION: ${{ secrets.YDY_AUTHORIZATION }}
+      # 多个目录名（逗号分隔）放在 Secret 里，公开仓库的 workflow 文件不暴露目录名
+      YDY_FOLDERS: ${{ secrets.YDY_FOLDERS }}
+      JAVDB_USERNAME: ${{ secrets.JAVDB_USERNAME }}
+      JAVDB_PASSWORD: ${{ secrets.JAVDB_PASSWORD }}
+      CUTOFF: ${{ github.event.inputs.cutoff || '2026-09-01' }}
+      OUT_PREFIX: javdb_yiyuan   # 合并清单统一前缀
+      SLEEP_REQ: '1.6'
+      STATE_FILE: state_javdb.json
+      SKIP_FC2: '1'              # 跳过 FC2/PPV
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run crawler (merged dirs, FC2 skipped)
+        run: |
+          python tools/crawler.py
+
+      - name: Send merged report to Telegram
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          JAVDB_OUT_DIR: .
+        run: |
+          python tools/tg_javdb_report.py --send || echo "report step non-fatal"
+
+      - name: Commit results & state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f javdb_yiyuan_magnet_ed2k_*.csv javdb_yiyuan_links_*.txt state_javdb.json || true
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "chore: update javdb comment links $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: javdb-comment-links
+          path: |
+            javdb_yiyuan_*.csv
+            javdb_yiyuan_*.txt
+          if-no-files-found: warn
