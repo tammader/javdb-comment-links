@@ -35,9 +35,10 @@ CUTOFF = os.environ.get('CUTOFF', '2026-09-01')
 # 具体目录名由环境变量传入，源码里不写死（公开仓库脱敏）
 FOLDERS = [x.strip() for x in os.environ.get('YDY_FOLDERS', '').split(',') if x.strip()]
 OUT_PREFIX = os.environ.get('OUT_PREFIX', 'javdb_yiyuan')
-SLEEP_REQ = float(os.environ.get('SLEEP_REQ', '1.6'))
+SLEEP_REQ = float(os.environ.get('SLEEP_REQ', '3.5'))   # 请求间隔（默认 3.5s，防封）
 STATE_FILE = os.environ.get('STATE_FILE', 'state.json')
-MAX_CODES = int(os.environ.get('MAX_CODES', '0'))
+MAX_CODES = int(os.environ.get('MAX_CODES', '40'))       # 每轮最多处理多少番号（0=不限）
+MAX_REVIEW_PAGES = int(os.environ.get('MAX_REVIEW_PAGES', '3'))  # 每部片评论最多翻几页
 
 VIDEO_EXT = ('.mp4', '.mkv', '.avi', '.wmv', '.mov', '.flv', '.ts', '.m2ts', '.rmvb', '.iso', '.strm')
 SKIP_FC2 = os.environ.get('SKIP_FC2', '1') == '1'   # 默认跳过 FC2/PPV
@@ -189,6 +190,8 @@ def crawl_movie_reviews(client, mid, code, state, folders=''):
                     'username': rv.get('username'), 'link_type': ltype, 'link': link,
                 })
         page += 1
+        if MAX_REVIEW_PAGES and page > MAX_REVIEW_PAGES:
+            break
         time.sleep(SLEEP_REQ)
 
 
@@ -266,8 +269,6 @@ def main():
             d['folders'].add(f.get('folder', ''))
         keys = sorted(codes.items())
         print('合并唯一番号: %d' % len(keys))
-        if MAX_CODES:
-            keys = keys[:MAX_CODES]
 
     # 3) JavDB 登录
     jc = JavDB(username=juser, password=jpass)
@@ -277,9 +278,15 @@ def main():
     print('已处理 %d / 无匹配 %d / 已有链接 %d' %
           (len(state['resolved']), len(state['no_match']), len(state['rows'])))
 
+    # 只挑还没处理过的番号；本轮最多处理 MAX_CODES 个（分多轮增量补齐，降低单轮请求量）
+    todo = [(k, v) for k, v in keys if k not in state['resolved'] and k not in state['no_match']]
+    print('待处理 %d 个（本轮上限 %d）' % (len(todo), MAX_CODES if MAX_CODES else len(todo)))
+    if MAX_CODES:
+        keys = todo[:MAX_CODES]
+    else:
+        keys = todo
+
     for i, (key, info) in enumerate(keys, 1):
-        if key in state['resolved'] or key in state['no_match']:
-            continue
         try:
             mv = resolve_movie(jc, info['label'], info['digits'])
             time.sleep(SLEEP_REQ)
