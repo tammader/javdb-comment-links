@@ -1,7 +1,8 @@
 name: javdb-comment-links
 
 # 每周一 03:17（北京时间）跑一次；也可手动触发
-# 一个清单 = 多个 139 个人云目录合并（目录名走 Secret，公开仓库不暴露）
+# 数据来源：仓库里的 movie_codes.json（番号清单，由本机 gen_movie_codes.py 生成后提交）
+# 原因：GitHub 海外 runner 连不上 139 移动云盘，所以列目录只在能做的地方做，这里只爬 JavDB + 发通知
 on:
   schedule:
     - cron: '17 19 * * 0'   # UTC 周日19:17 = 北京周一 03:17
@@ -23,16 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
-      YDY_AUTHORIZATION: ${{ secrets.YDY_AUTHORIZATION }}
-      # 多个目录名（逗号分隔）放在 Secret 里，公开仓库的 workflow 文件不暴露目录名
-      YDY_FOLDERS: ${{ secrets.YDY_FOLDERS }}
       JAVDB_USERNAME: ${{ secrets.JAVDB_USERNAME }}
       JAVDB_PASSWORD: ${{ secrets.JAVDB_PASSWORD }}
+      MOVIE_CODES_FILE: movie_codes.json
       CUTOFF: ${{ github.event.inputs.cutoff || '2026-09-01' }}
-      OUT_PREFIX: javdb_yiyuan   # 合并清单统一前缀
+      OUT_PREFIX: javdb_yiyuan
       SLEEP_REQ: '1.6'
       STATE_FILE: state_javdb.json
-      SKIP_FC2: '1'              # 跳过 FC2/PPV
+      SKIP_FC2: '1'
       PYTHONIOENCODING: utf-8
 
     steps:
@@ -42,15 +41,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run crawler (merged dirs, FC2 skipped)
-        id: crawl
+      - name: Run crawler (JavDB only, codes from movie_codes.json)
         run: |
-          # 139 域名偶发 DNS 抖动，重试几次
-          for i in 1 2 3; do
-            python tools/crawler.py && exit 0
-            echo "尝试 $i 失败，30s 后重试…"; sleep 30
-          done
-          exit 1
+          python tools/crawler.py
 
       - name: Send report to Telegram (only if crawler succeeded)
         if: success()
