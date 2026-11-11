@@ -43,17 +43,38 @@ jobs:
           python-version: '3.11'
 
       - name: Run crawler (merged dirs, FC2 skipped)
+        id: crawl
         run: |
-          python tools/crawler.py
+          # 139 域名偶发 DNS 抖动，重试几次
+          for i in 1 2 3; do
+            python tools/crawler.py && exit 0
+            echo "尝试 $i 失败，30s 后重试…"; sleep 30
+          done
+          exit 1
 
-      - name: Send merged report to Telegram
-        if: always()
+      - name: Send report to Telegram (only if crawler succeeded)
+        if: success()
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           JAVDB_OUT_DIR: .
         run: |
-          python tools/tg_javdb_report.py --send || echo "report step non-fatal"
+          python tools/tg_javdb_report.py --send
+
+      - name: Notify failure to Telegram
+        if: failure()
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os, urllib.parse, urllib.request
+          tok=os.environ.get('TG_TOKEN',''); chat=os.environ.get('TG_CHAT_ID','')
+          if tok and chat:
+              t='⚠️ JavDB 抓取任务本轮失败（crawler 步骤报错），未生成新报告。请查 Actions 日志。'
+              d=urllib.parse.urlencode({'chat_id':chat,'text':t}).encode()
+              urllib.request.urlopen(urllib.request.Request('https://api.telegram.org/bot%s/sendMessage'%tok,data=d),timeout=30)
+          PY
 
       - name: Commit results & state
         if: always()
