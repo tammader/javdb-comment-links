@@ -1,0 +1,23 @@
+name: javdb-signed-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: signed startup call
+        run: |
+          python3 tools/javdb_api.py_probe 2>/dev/null || python3 - <<'PY'
+          import hashlib, time, urllib.request
+          PART1='71cf27bb3c0bcdf207b64abecddc970098c7421ee7203b9cdae54478478a199e7d5a6e1a57691123c1a931c057842fb73ba3b3c83bcd69c17ccf174081e3d8aa'
+          PART2='lpw6vgqzsp'
+          def sign():
+              ts=int(time.time()); return '%d.%s.%s'%(ts,PART2,hashlib.md5(('%d%s'%(ts,PART1)).encode()).hexdigest())
+          q='platform=android&app_channel=official&app_version=1.9.29&app_version_number=1.9.29'
+          req=urllib.request.Request('https://jdforrepam.com/api/v1/startup?'+q, headers={
+              'jdsignature':sign(),'accept-language':'zh','user-agent':'Dart/3.5 (dart:io)','accept':'application/json'})
+          try:
+              r=urllib.request.urlopen(req,timeout=25); b=r.read()[:300]; print('STARTUP OK', r.status, b)
+          except Exception as e:
+              print('STARTUP ERR', repr(e)[:300])
+          PY
